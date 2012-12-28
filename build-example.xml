@@ -1,0 +1,40 @@
+<project name="project" xmlns:artifact="urn:maven-artifact-ant" default="package">
+	<available file=".git" type="dir" property="git.present"/>
+	<available file=".svn" type="dir" property="svn.present"/>
+	<import file="ant-common.xml" as="common"/>
+
+	<!-- Iterate through sub projects with global properties -->
+	<macrodef name="iterate">
+		<attribute name="target"/>
+		<sequential>
+			<subant target="@{target}">
+				<!-- 
+					When build order for sub projects is not order dependent, you can do the following
+					<fileset dir="." includes="*/build.xml"/>
+					
+					Otherwise you will need to specify a series of filesets
+					<fileset dir="base-project" includes="build.xml"/>
+					<fileset dir="sub-project1" includes="build.xml"/>
+					<fileset dir="sub-project2" includes="build.xml"/>
+				-->
+			</subant>
+		</sequential>
+	</macrodef>
+	
+	<target name="clean" depends="project.clean">
+		<iterate target="project.clean"/>
+	</target>
+
+ 	<target name="package" depends="project.revision, project.branch">
+		<iterate target="project.package"/>
+ 		<zip destFile="${pkg.dir}/${ant.project.name}-${revision.branch}-${revision.number}.zip" duplicate="preserve">
+ 			<zipfileset dir="base-project" prefix="base" includes="**/*" />
+			<zipfileset dir="sub-project1" prefix="sub1" includes="**/*" />
+			<zipfileset dir="sub-project2" prefix="sub2" includes="**/*" />
+		</zip>
+    </target>
+
+	<target name="revision" depends="project.revision, project.branch">
+		<echo>Revision ${revision.number} of branch ${revision.branch}</echo>
+	</target>
+</project>

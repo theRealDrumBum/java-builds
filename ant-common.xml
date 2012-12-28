@@ -1,0 +1,156 @@
+<project xmlns:artifact="urn:maven-artifact-ant">
+	<property name="pom"			value="pom.xml" />
+	<property name="src.dir"		value="src" />
+	<property name="build.dir"		value="build" />
+	<property name="build.classes.dir"	value="${build.dir}/classes" />
+	<property name="dist.dir"		value="dist" />
+	<property name="dist.lib.dir"	value="${dist.dir}/lib" />
+	<property name="lib.dir"		value="${dist.lib.dir}" />
+	<property name="pkg.dir"		value="pkg" />
+	<property name="jar"			value="${ant.project.name}.jar" />
+	
+	<import file="maven-dependencies.xml" />
+	<target name="git.revision" description="Store git revision in ${revision.number}" if="git.present">
+	    <exec executable="git" outputproperty="git.revision" failifexecutionfails="false" errorproperty="">
+	        <arg value="describe"/>
+	        <arg value="--tags"/>
+	        <arg value="--always"/>
+	        <arg value="HEAD"/>
+	    </exec>
+	    <condition property="revision.number" value="${git.revision}" else="unknown">
+	        <and>
+	            <isset property="git.revision"/>
+	            <length string="${git.revision}" trim="yes" length="0" when="greater"/>
+	        </and>
+	    </condition>
+	</target>
+
+	<target name="git.branch" description="Determine the branch this git checkout refers to" if="git.present">
+		<exec executable="sh" outputproperty="git.branch" failifexecutionfails="false" errorproperty="">
+    		<arg value="-c"/>
+    		<arg line='"git symbolic-ref -q HEAD | xargs basename"'/>
+		</exec>
+		<echo>${git.branch}</echo>
+		<condition property="revision.branch" value="${git.branch}" else="unknown">
+	        <and>
+	            <isset property="git.branch"/>
+	            <length string="${git.branch}" trim="yes" length="0" when="greater"/>
+	        </and>
+	    </condition>
+	</target>
+
+	<!-- Determine revision for an svn checkout -->
+	<target name="svn.revision" description="Store svn revision in ${revision.number}" if="svn.present">
+		<exec executable="svnversion" outputproperty="svnversion.out" failifexecutionfails="false" errorproperty=""/>
+		<property name="revision.number" value="${svnversion.out}" />
+	</target>
+	
+	<!-- Determine branch for an svn checkout -->
+	<target name="svn.branch" description="Find the branch this code was build from." if="svn.present">
+		<exec executable="sh" outputproperty="svn.branch" failifexecutionfails="false" errorproperty="">
+			<arg value="-c" />
+			<arg value="svn info | grep URL | awk '{print $2}' | xargs basename" />
+		</exec>
+		<condition property="revision.branch" value="${svn.branch}" else="unknown">
+	        <and>
+	            <isset property="svn.branch"/>
+	            <length string="${svn.branch}" trim="yes" length="0" when="greater"/>
+	        </and>
+	    </condition>
+    </target>
+	
+	<!-- Gets the revision for this checkout -->	
+	<target name="project.revision" depends="svn.revision, git.revision"
+		description="Store revision id in ${revision.number} from either git or svn">  
+		<echo>Revision found: ${revision.number}</echo>
+	</target>  
+	
+	<!-- Gets the branch for this checkout -->
+	<target name="project.branch" depends="svn.branch,git.branch"
+		description="Determine the branch name for either a git or svn checkout">
+		<echo>Branch found: ${revision.branch}</echo>
+	</target>
+
+	<!-- Purges build artifacts -->
+	<target name="project.clean">
+		<delete includeEmptyDirs="true" failonerror="false">
+			<fileset dir="${build.dir}" />
+			<fileset dir="${dist.dir}" />
+			<fileset dir="${pkg.dir}" />
+		</delete>
+	</target>
+	
+	<!-- Creates required directories -->
+	<target name="project.init">
+		<mkdir dir="${build.dir}" />
+		<mkdir dir="${build.classes.dir}" />
+		<mkdir dir="${dist.dir}" />
+		<mkdir dir="${pkg.dir}" />
+	</target>
+	
+	<!-- Calculate dependencies for project and copy to lib -->
+	<target name="project.dependencies" depends="project.init,maven.package" />
+	
+	<!-- Compile source code -->
+	<target name="project.compile" depends="project.revision, project.dependencies">
+		<!-- We build a list of jars that need to be packaged with the jar, flatten and reference -->
+		<path id="runtime.classpath">
+			<fileset dir="${lib.dir}" includes="*.jar"/>
+		</path>
+		
+		<!-- need maven.compile.classpath to properly handle 'provided' scope -->
+		<javac srcdir="${src.dir}" debug="true" debugLevel="lines,vars,source" 
+			destdir="${build.classes.dir}" classpathref="maven.compile.classpath"/>
+		<tstamp>
+			<format property="timestamp.isoformat" pattern="yyyy-MM-dd'T'HH:mm:ss" locale="en"/>
+		</tstamp>
+	</target>
+
+
+	<!-- Makes the manifest file -->
+	<target name="project.manifest" depends="project.compile">
+		<property name="manifest.mf" location="${build.classes.dir}/manifest.mf"/>
+		<manifestclasspath property="lib.list" jarfile="${dist.dir}/${jar}">
+			<classpath refid="runtime.classpath"/>
+		</manifestclasspath>
+		<manifest file="${manifest.mf}">
+			<attribute name="Built-By" value="${user.name}"/>
+			<attribute name="Built-On" value="${timestamp.isoformat}"/>
+			<attribute name="Build-Revision" value="${revision.number}"/>
+			<attribute name="Build-Client-Dir" value="${build.client.dir}"/>
+			<attribute name="Class-Path" value=". ${lib.list}"/>
+		</manifest>
+	</target>
+	
+	<!-- Adds the main class to the manifest if applicable -->
+	<target name="project.manifest.main" if="main.class">
+		<manifest file="${manifest.mf}" mode="update">
+			<attribute name="Main-Class" value="${main.class}" />
+		</manifest>
+	</target>	
+	
+    
+	<!-- Create jar -->
+	<target name="project.jar" depends="project.manifest, project.manifest.main">
+		<echo file="${dist.dir}/RELEASE">${revision.number}</echo>
+		<jar destfile="${dist.dir}/${jar}" manifest="${manifest.mf}" basedir="${build.classes.dir}">
+			<!-- TODO: Remove -->
+			<fileset dir="src/">
+				<include name="log4j*"/>
+			</fileset>
+		</jar>
+	</target>
+	
+	<target name="project.install" depends="project.jar,maven.install"></target>
+	
+	<!-- Package additional resources. -->
+	<target name="project.assemble" depends="project.install" />
+	
+	<!--  Package the desired assembly into a zip file -->
+	<target name="project.package" depends="project.assemble">
+		<property name="zip" value="${ant.project.name}-${revision.number}.zip" />
+		<zip destFile="${pkg.dir}/${zip}" duplicate="preserve">
+			<zipfileset	dir="${dist.dir}" includes="**/*" prefix="${ant.project.name}" />
+		</zip>
+	</target>
+</project>
